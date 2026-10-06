@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>회의실 예약</title>
+<title>미팅룸 예약</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
 <style>
 /* 레이아웃: 상단 제목+예약 버튼, 날짜 이동 툴바, 시간표(일/주) 위에 예약 블록, 입력/상세는 가운데 패널 */
@@ -37,6 +37,7 @@
 *{box-sizing:border-box}
 html{color-scheme:light}
 body{margin:0}
+[hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--font)}
 button,input,select{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -122,6 +123,28 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
   .chip,.more{display:none}
   .cnt{display:block}
 }
+.chip{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
+.chip .cn{opacity:.85}
+.mc.past{cursor:default}
+.mc.past:hover{background:transparent}
+.list{margin-top:28px}
+.lh{margin:0 0 10px;font-size:16px;font-weight:600}
+.items{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.dh{padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--line-soft)}
+.dh.today{color:var(--accent)}
+.it{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line-soft);background:transparent;padding:10px 14px;cursor:pointer}
+.it:last-child{border-bottom:0}
+.it:hover{background:var(--today)}
+.it .tm{font:13px var(--mono);color:var(--muted)}
+.it .tt{font-weight:500;overflow-wrap:anywhere}
+.it .by{font-size:13px;color:var(--muted)}
+.it .rp{grid-column:2/4;justify-self:start;font-size:11px;color:var(--accent)}
+.it.mine .by{color:var(--accent);font-weight:500}
+.more-btn{margin-top:10px;width:100%}
+.help{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.help p{margin:0 0 4px}
+.help a{color:var(--accent)}
+@media (max-width:520px){.it{grid-template-columns:minmax(0,1fr) auto}.it .tm{grid-column:1/3}.it .rp{grid-column:1/3}}
 @media (max-width:520px){.range{flex-basis:100%}}
 @media (prefers-reduced-motion:no-preference){.btn{transition:border-color .15s}}
 </style>
@@ -130,8 +153,7 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
 <div class="wrap">
   <header class="top">
     <div>
-      <h1>회의실 예약</h1>
-      <p class="sub">09:00–19:00 · 30분 단위 · 예약은 팀원 모두에게 바로 보입니다</p>
+      <h1>미팅룸 예약</h1>
     </div>
     <button class="btn primary" id="new-btn" type="button">예약하기</button>
   </header>
@@ -143,15 +165,15 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
       <button class="btn" id="next" type="button" aria-label="다음">›</button>
     </div>
     <div class="range" id="range" aria-live="polite"></div>
-    <div class="seg" role="group" aria-label="보기 방식">
-      <button type="button" id="v-month" aria-pressed="true">월</button>
-      <button type="button" id="v-week" aria-pressed="false">주</button>
-      <button type="button" id="v-day" aria-pressed="false">일</button>
-    </div>
   </div>
   <div class="cal-scroll" id="cal-scroll"></div>
   <p class="note" id="note"></p>
-  <div class="legend"><span><i class="a"></i>내 예약</span><span><i class="b"></i>다른 팀원 예약</span></div>
+  <div class="legend"><span><i class="a"></i>내가 예약한 건</span><span><i class="b"></i>다른 팀원 예약</span></div>
+  <section class="list" id="list" aria-label="예약 목록"></section>
+  <footer class="help">
+    <p>수정요청, 버그제보, 기타문의는 언제든지 연락주세요</p>
+    <p><a href="https://open.kakao.com/me/ceo24" target="_blank" rel="noopener">카카오톡 1:1 메시지 바로가기</a></p>
+  </footer>
 </div>
 <div id="overlay-root"></div>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -166,7 +188,7 @@ import { firebaseConfig } from "./firebase-config.js";
   var SLOTS=(END-START)/STEP, SLOT_H=26;
   var DOW=['일','월','화','수','목','금','토'];
   var REPEATS={none:'반복 안 함',weekly:'매주',biweekly:'격주',weekdays:'평일 매일'};
-  var MAX_OCC=60;
+  var MAX_OCC=200;
   var DB=null;
 
   function $(id){return document.getElementById(id);}
@@ -202,7 +224,7 @@ import { firebaseConfig } from "./firebase-config.js";
   function mondayOf(d){var x=new Date(d);var w=x.getDay();x.setDate(x.getDate()+(w===0?-6:1-w));return x;}
 
   var S={
-    view:'month',
+    view:'month',listLimit:20,
     cursor:new Date(),
     bookings:[],meId:null,myName:'',db:null,
     canWrite:false,loaded:false,error:'',
@@ -212,27 +234,9 @@ import { firebaseConfig } from "./firebase-config.js";
 
   function nameOf(b){return (b&&b.byName)||'이름 없음';}
 
-  /* ---------- 시간표 ---------- */
-  function visibleDays(){
-    if(S.view==='day')return [new Date(S.cursor)];
-    var m=mondayOf(S.cursor),a=[];
-    for(var i=0;i<5;i++)a.push(addDays(m,i));
-    return a;
-  }
-
+  /* ---------- 달력 ---------- */
   function renderToolbar(){
-    var days=S.view==='month'?[]:visibleDays();
-    var txt;
-    if(S.view==='month')txt=S.cursor.getFullYear()+'년 '+(S.cursor.getMonth()+1)+'월';
-    else if(S.view==='day')txt=S.cursor.getFullYear()+'년 '+dayLabel(S.cursor);
-    else{
-      var a=days[0],b=days[days.length-1];
-      txt=a.getFullYear()+'년 '+(a.getMonth()+1)+'월 '+a.getDate()+'일 – '+((b.getMonth()!==a.getMonth())?(b.getMonth()+1)+'월 ':'')+b.getDate()+'일';
-    }
-    $('range').textContent=txt;
-    $('v-month').setAttribute('aria-pressed',S.view==='month');
-    $('v-day').setAttribute('aria-pressed',S.view==='day');
-    $('v-week').setAttribute('aria-pressed',S.view==='week');
+    $('range').textContent=S.cursor.getFullYear()+'년 '+(S.cursor.getMonth()+1)+'월';
     $('new-btn').disabled=!S.canWrite;
   }
 
@@ -245,69 +249,18 @@ import { firebaseConfig } from "./firebase-config.js";
   function renderGrid(){
     renderToolbar();
     renderBanner();
-    if(S.view==='month'){renderMonth();return;}
-    var days=visibleDays();
-    var n=days.length;
-    var cal=h('div',{class:'cal'});
-    cal.style.setProperty('--n',n);
-    cal.style.setProperty('--slots',SLOTS);
-    cal.style.setProperty('--colmin',S.view==='week'?'112px':'0px');
-    cal.style.minWidth=(S.view==='week'?48+n*112:0)+'px';
-    var tStr=todayStr();
-    cal.append(h('div',{class:'corner'}));
-    days.forEach(function(d){
-      var isT=ymd(d)===tStr;
-      cal.append(h('div',{class:'cal-head'+(isT?' today':'')},
-        h('div',{class:'d',text:DOW[d.getDay()]}),
-        h('div',{class:'n',text:(d.getMonth()+1)+'/'+d.getDate()})
-      ));
-    });
-    var g=h('div',{class:'gutter'});
-    for(var m=START;m<END;m+=60){
-      var sp=h('span',{text:hm(m)});
-      sp.style.top=Math.max(8,((m-START)/STEP)*SLOT_H)+'px';
-      g.append(sp);
+    renderMonth();
+    renderList();
+  }
+
+  function defaultStart(ds){
+    var st=10*60;
+    if(ds===todayStr()){
+      var n=new Date();
+      var m=Math.ceil((n.getHours()*60+n.getMinutes())/STEP)*STEP;
+      if(m>st)st=m;
     }
-    cal.append(g);
-    var now=new Date(),nowMin=now.getHours()*60+now.getMinutes();
-    var count=0;
-    days.forEach(function(d){
-      var ds=ymd(d);
-      var col=h('div',{class:'col'+(ds===tStr?' today':'')+(S.canWrite?'':' disabled')});
-      col.addEventListener('click',function(e){
-        if(e.target!==col||!S.canWrite)return;
-        var slot=Math.floor(e.offsetY/SLOT_H);
-        var s=START+slot*STEP;
-        openForm({date:ds,start:s,end:Math.min(s+60,END)});
-      });
-      S.bookings.filter(function(b){return b.date===ds;}).forEach(function(b){
-        count++;
-        var top=(b.start-START)/STEP*SLOT_H;
-        var ht=(b.end-b.start)/STEP*SLOT_H-2;
-        var mine=b.by&&b.by===S.meId;
-        var el=h('button',{type:'button',class:'bk '+(mine?'mine':'other'),onclick:function(){openDetail(b.id);}});
-        el.style.top=(top+1)+'px';
-        el.style.height=ht+'px';
-        el.append(h('span',{class:'t',text:b.title}));
-        if(ht>=40)el.append(h('span',{class:'m',text:hm(b.start)+'–'+hm(b.end)}));
-        if(ht>=66)el.append(h('span',{class:'m',text:nameOf(b)}));
-        el.setAttribute('aria-label',b.title+', '+hm(b.start)+'부터 '+hm(b.end)+'까지, '+nameOf(b));
-        col.append(el);
-      });
-      if(ds===tStr&&nowMin>=START&&nowMin<END){
-        var line=h('div',{class:'now'});
-        line.style.top=((nowMin-START)/STEP*SLOT_H)+'px';
-        col.append(line);
-      }
-      cal.append(col);
-    });
-    var sc=$('cal-scroll');
-    sc.replaceChildren(cal);
-    var note='';
-    if(!S.db)note='';
-    else if(!S.loaded)note='예약 내용을 불러오는 중입니다.';
-    else if(count===0)note=S.canWrite?'이 기간에 예약이 없습니다. 비어 있는 시간을 눌러 예약하세요.':'이 기간에 예약이 없습니다.';
-    $('note').textContent=note;
+    return Math.min(Math.max(st,START),END-STEP);
   }
 
   function renderMonth(){
@@ -327,8 +280,13 @@ import { firebaseConfig } from "./firebase-config.js";
         var inM=d.getMonth()===mo;
         if(inM)total+=list.length;
         var cell=h('div',{class:'mc'+(inM?'':' out')+(ds===tStr?' today':'')+(ds<tStr?' past':''),role:'button',tabindex:'0',
-          'aria-label':dayLabel(d)+(list.length?', 예약 '+list.length+'건':', 예약 없음')});
-        function go(){S.cursor=parse(ds);S.view='day';renderGrid();}
+          'aria-label':dayLabel(d)+(list.length?', 예약 '+list.length+'건':', 예약 없음')+(ds<tStr?'':', 눌러서 예약')});
+        function go(){
+          if(!S.canWrite)return;
+          if(ds<tStr){toast('지난 날짜에는 예약할 수 없습니다.');return;}
+          var st=defaultStart(ds);
+          openForm({date:ds,start:st,end:Math.min(st+60,END)});
+        }
         cell.addEventListener('click',go);
         cell.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}});
         cell.append(h('span',{class:'dn',text:String(d.getDate())}));
@@ -336,7 +294,7 @@ import { firebaseConfig } from "./firebase-config.js";
           var mine=b.by&&b.by===S.meId;
           cell.append(h('button',{type:'button',class:'chip '+(mine?'mine':'other'),
             onclick:function(e){e.stopPropagation();openDetail(b.id);}},
-            h('span',{class:'ct',text:hm(b.start)}),' ',b.title));
+            h('span',{class:'ct',text:hm(b.start)}),' ',b.title,' ',h('span',{class:'cn',text:'· '+nameOf(b)})));
         });
         if(list.length>3)cell.append(h('span',{class:'more',text:'+'+(list.length-3)+'건 더'}));
         if(list.length)cell.append(h('span',{class:'cnt',text:list.length+'건'}));
@@ -348,8 +306,40 @@ import { firebaseConfig } from "./firebase-config.js";
     if(!S.db)note='';
     else if(!S.loaded)note='예약 내용을 불러오는 중입니다.';
     else if(total===0)note='이번 달 예약이 없습니다. 날짜를 눌러 예약하세요.';
-    else note='이번 달 예약 '+total+'건 · 날짜를 누르면 그날의 시간표가 열립니다.';
+    else note='이번 달 예약 '+total+'건 · 날짜를 누르면 예약할 수 있습니다.';
     $('note').textContent=note;
+  }
+
+  function renderList(){
+    var box=$('list');
+    box.replaceChildren(h('h2',{class:'lh',text:'예약 목록'}));
+    if(!S.db)return;
+    if(!S.loaded){box.append(h('p',{class:'note',text:'불러오는 중입니다.'}));return;}
+    var t=todayStr(),n=new Date(),nowMin=n.getHours()*60+n.getMinutes(),thisYear=n.getFullYear();
+    var up=S.bookings.filter(function(b){return b.date>t||(b.date===t&&b.end>nowMin);})
+      .sort(function(a,b){return a.date<b.date?-1:(a.date>b.date?1:a.start-b.start);});
+    if(!up.length){box.append(h('p',{class:'note',text:'앞으로 예정된 예약이 없습니다.'}));return;}
+    var shown=up.slice(0,S.listLimit),lastDate='';
+    var items=h('div',{class:'items'});
+    shown.forEach(function(b){
+      if(b.date!==lastDate){
+        lastDate=b.date;
+        var dd=parse(b.date);
+        items.append(h('div',{class:'dh'+(b.date===t?' today':''),
+          text:(b.date===t?'오늘 · ':'')+(dd.getFullYear()!==thisYear?dd.getFullYear()+'년 ':'')+dayLabel(dd)}));
+      }
+      var mine=b.by&&b.by===S.meId;
+      items.append(h('button',{type:'button',class:'it'+(mine?' mine':''),onclick:function(){openDetail(b.id);}},
+        h('span',{class:'tm',text:hm(b.start)+'–'+hm(b.end)}),
+        h('span',{class:'tt',text:b.title}),
+        h('span',{class:'by',text:nameOf(b)}),
+        b.seriesId?h('span',{class:'rp',text:'반복 · '+(REPEATS[b.repeat]||'')}):null));
+    });
+    box.append(items);
+    if(up.length>shown.length){
+      box.append(h('button',{type:'button',class:'btn more-btn',text:'더 보기 ('+(up.length-shown.length)+'건 남음)',
+        onclick:function(){S.listLimit+=20;renderList();}}));
+    }
   }
 
   /* ---------- 패널 공통 ---------- */
@@ -438,8 +428,8 @@ import { firebaseConfig } from "./firebase-config.js";
     S.panel={type:'form'};
     var edit=f.mode==='edit';
 
-    var title=h('input',{id:'f-title',type:'text',maxlength:'60',placeholder:'예: 주간 팀 미팅','data-autofocus':true,value:f.title});
-    var who=h('input',{id:'f-name',type:'text',maxlength:'30',placeholder:'예: 김명훈',value:edit?'':S.myName});
+    var title=h('input',{id:'f-title',type:'text',maxlength:'60',placeholder:'예: 미팅','data-autofocus':true,value:f.title});
+    var who=h('input',{id:'f-name',type:'text',maxlength:'30',placeholder:'예: 홍길동',value:edit?'':S.myName});
     var date=h('input',{id:'f-date',type:'date',min:todayStr(),value:f.date});
     var start=timeSelect('f-start',START,END-STEP,f.start);
     var end=timeSelect('f-end',START+STEP,END,f.end);
@@ -450,9 +440,24 @@ import { firebaseConfig } from "./firebase-config.js";
     Object.keys(REPEATS).forEach(function(k){repeat.append(h('option',{value:k,text:REPEATS[k]}));});
     repeat.value=f.repeat;
     var until=h('input',{id:'f-until',type:'date',min:todayStr(),value:ymd(addDays(parse(f.date),28))});
-    var untilField=h('div',{class:'field'},h('label',{for:'f-until',text:'반복 종료일'}),until);
-    untilField.hidden=true;
-    repeat.addEventListener('change',function(){untilField.hidden=repeat.value==='none';});
+    var endMode=h('select',{id:'f-endmode'},
+      h('option',{value:'date',text:'종료일 지정'}),
+      h('option',{value:'none',text:'종료 없음 (6개월 치를 미리 예약)'}));
+    var untilWrap=h('div',{class:'field'},h('label',{for:'f-until',text:'반복 종료일'}),until);
+    var untilField=h('div',{},h('div',{class:'field'},h('label',{for:'f-endmode',text:'반복 기간'}),endMode),untilWrap);
+    function syncRepeat(){
+      untilField.hidden=repeat.value==='none';
+      untilWrap.hidden=endMode.value==='none';
+    }
+    repeat.addEventListener('change',syncRepeat);
+    endMode.addEventListener('change',syncRepeat);
+    function pop(el){el.addEventListener('click',function(){try{if(el.showPicker)el.showPicker();}catch(x){}});}
+    pop(date);pop(until);
+    var dateLabel=h('label',{for:'f-date',text:'날짜'});
+    function showDow(){dateLabel.textContent=date.value?'날짜 ('+DOW[parse(date.value).getDay()]+'요일)':'날짜';}
+    date.addEventListener('input',showDow);
+    date.addEventListener('change',showDow);
+    showDow();
     date.addEventListener('change',function(){
       if(date.value&&!edit)until.value=ymd(addDays(parse(date.value),28));
     });
@@ -485,7 +490,8 @@ import { firebaseConfig } from "./firebase-config.js";
       var nowD=new Date();
       if(d===todayStr()&&e<=nowD.getHours()*60+nowD.getMinutes()){err.textContent='이미 지난 시간입니다.';return;}
       var rep=edit?'none':repeat.value;
-      if(rep!=='none'&&(!until.value||until.value<d)){err.textContent='반복 종료일을 시작 날짜 이후로 선택하세요.';return;}
+      var untilStr=endMode.value==='none'?ymd(addDays(parse(d),183)):until.value;
+      if(rep!=='none'&&endMode.value==='date'&&(!until.value||until.value<d)){err.textContent='반복 종료일을 시작 날짜 이후로 선택하세요.';return;}
       okBtn.disabled=true;skipBtn.disabled=true;
       try{
         var made=0,failed=0;
@@ -499,7 +505,7 @@ import { firebaseConfig } from "./firebase-config.js";
         }else{
           S.myName=nm;
           try{localStorage.setItem('mr-name',nm);}catch(x){}
-          var dates=occurrences(d,rep,until.value);
+          var dates=occurrences(d,rep,untilStr);
           var cfs=localConflicts(dates,s,e,null);
           var bad=new Set(cfs.map(function(c){return c.date;}));
           var good=dates.filter(function(x){return !bad.has(x);});
@@ -509,6 +515,7 @@ import { firebaseConfig } from "./firebase-config.js";
           }
           var sid=rep!=='none'?(window.crypto&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2)):null;
           for(var i=0;i<good.length;i++){
+            if(good.length>1)okBtn.textContent='예약 중… '+(i+1)+'/'+good.length;
             try{
               await place(null,{title:t,date:good[i],start:s,end:e,by:S.meId,byName:nm,seriesId:sid,repeat:rep,createdAt:Date.now()},null);
               made++;
@@ -524,7 +531,7 @@ import { firebaseConfig } from "./firebase-config.js";
         else if(made===0)toast('다른 사람이 방금 같은 시간을 예약했습니다.');
         else toast((made>1?made+'건을 예약했습니다.':'예약했습니다.')+(failed?' ('+failed+'건은 방금 다른 예약과 겹쳐 제외)':''));
       }catch(x){
-        okBtn.disabled=false;skipBtn.disabled=false;
+        okBtn.disabled=false;skipBtn.disabled=false;okBtn.textContent=edit?'저장':'예약하기';
         if(x&&x.kind==='conflict')err.textContent='다른 사람이 방금 같은 시간을 예약했습니다. 시간표를 확인하고 다시 시도하세요.';
         else err.textContent='저장하지 못했습니다. 인터넷 연결과 Firebase 설정을 확인하고 다시 시도하세요.';
       }
@@ -533,7 +540,7 @@ import { firebaseConfig } from "./firebase-config.js";
     var form=h('form',{novalidate:true,onsubmit:function(ev){ev.preventDefault();run(false);}},
       h('div',{class:'field'},h('label',{for:'f-title',text:'회의 제목'}),title),
       edit?null:h('div',{class:'field'},h('label',{for:'f-name',text:'예약자 이름'}),who),
-      h('div',{class:'field'},h('label',{for:'f-date',text:'날짜'}),date),
+      h('div',{class:'field'},dateLabel,date),
       h('div',{class:'row2'},
         h('div',{class:'field'},h('label',{for:'f-start',text:'시작'}),start),
         h('div',{class:'field'},h('label',{for:'f-end',text:'종료'}),end)
@@ -545,8 +552,8 @@ import { firebaseConfig } from "./firebase-config.js";
       err,
       h('div',{class:'actions'},cancelBtn,skipBtn,okBtn)
     );
-    untilField.hidden=repeat.value==='none';
-    showPanel([h('h2',{text:edit?'예약 수정':'회의실 예약'}),form],{label:edit?'예약 수정':'회의실 예약'});
+    syncRepeat();
+    showPanel([h('h2',{text:edit?'예약 수정':'미팅룸 예약'}),form],{label:edit?'예약 수정':'미팅룸 예약'});
     if(!edit&&S.myName)title.focus();else if(!edit)who.focus();
   }
 
@@ -613,16 +620,12 @@ import { firebaseConfig } from "./firebase-config.js";
 
   /* ---------- 이동 / 보기 ---------- */
   function shift(dir){
-    if(S.view==='month')S.cursor=new Date(S.cursor.getFullYear(),S.cursor.getMonth()+dir,1);
-    else S.cursor=addDays(S.cursor,dir*(S.view==='day'?1:7));
+    S.cursor=new Date(S.cursor.getFullYear(),S.cursor.getMonth()+dir,1);
     renderGrid();
   }
   $('prev').addEventListener('click',function(){shift(-1);});
   $('next').addEventListener('click',function(){shift(1);});
   $('today').addEventListener('click',function(){S.cursor=new Date();S.cursor.setHours(0,0,0,0);renderGrid();});
-  $('v-month').addEventListener('click',function(){S.view='month';renderGrid();});
-  $('v-day').addEventListener('click',function(){S.view='day';renderGrid();});
-  $('v-week').addEventListener('click',function(){S.view='week';renderGrid();});
   $('new-btn').addEventListener('click',function(){openForm();});
 
   /* ---------- 시작 ---------- */
