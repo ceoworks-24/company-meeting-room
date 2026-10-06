@@ -95,6 +95,7 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
 .field label{font-size:12px;color:var(--muted);font-weight:500}
 .field input,.field select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;min-height:38px;width:100%}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hint{font-size:12px;color:var(--muted)}
 .err{color:var(--danger);font-size:13px;margin:0 0 10px;min-height:0;white-space:pre-line}
 .actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:6px}
 .kv{display:grid;grid-template-columns:72px 1fr;gap:6px 10px;margin:0 0 16px}
@@ -117,11 +118,16 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
 .chip.other{background:var(--other);color:var(--other-ink);border-color:var(--other-line)}
 .chip .ct{font-family:var(--mono);font-size:10.5px;opacity:.85}
 .more{font-size:11px;color:var(--muted);padding-left:2px}
-.cnt{display:none;font-size:11px;font-weight:600;color:var(--accent);text-align:center}
+.tl{display:none;flex-direction:column;align-items:center;gap:2px;width:100%}
+.tl .t{font:10px/1.5 var(--mono);padding:0 3px;border-radius:4px;border:1px solid;white-space:nowrap}
+.tl .t.mine{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tl .t.other{background:var(--other);color:var(--other-ink);border-color:var(--other-line)}
+.tl .tmore{font-size:10px;color:var(--muted)}
+.panel .items{margin-bottom:14px}
 @media (max-width:560px){
-  .mc{min-height:64px;padding:4px 2px;align-items:center}
+  .mc{min-height:92px;padding:4px 2px;align-items:center}
   .chip,.more{display:none}
-  .cnt{display:block}
+  .tl{display:flex}
 }
 .chip{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}
 .chip .cn{opacity:.85}
@@ -224,7 +230,7 @@ import { firebaseConfig } from "./firebase-config.js";
   function mondayOf(d){var x=new Date(d);var w=x.getDay();x.setDate(x.getDate()+(w===0?-6:1-w));return x;}
 
   var S={
-    view:'month',listLimit:20,
+    view:'month',listLimit:20,panelFrom:null,
     cursor:new Date(),
     bookings:[],meId:null,myName:'',db:null,
     canWrite:false,loaded:false,error:'',
@@ -282,6 +288,7 @@ import { firebaseConfig } from "./firebase-config.js";
         var cell=h('div',{class:'mc'+(inM?'':' out')+(ds===tStr?' today':'')+(ds<tStr?' past':''),role:'button',tabindex:'0',
           'aria-label':dayLabel(d)+(list.length?', 예약 '+list.length+'건':', 예약 없음')+(ds<tStr?'':', 눌러서 예약')});
         function go(){
+          if(list.length){openDay(ds);return;}
           if(!S.canWrite)return;
           if(ds<tStr){toast('지난 날짜에는 예약할 수 없습니다.');return;}
           var st=defaultStart(ds);
@@ -297,7 +304,14 @@ import { firebaseConfig } from "./firebase-config.js";
             h('span',{class:'ct',text:hm(b.start)}),' ',b.title,' ',h('span',{class:'cn',text:'· '+nameOf(b)})));
         });
         if(list.length>3)cell.append(h('span',{class:'more',text:'+'+(list.length-3)+'건 더'}));
-        if(list.length)cell.append(h('span',{class:'cnt',text:list.length+'건'}));
+        if(list.length){
+          var tl=h('div',{class:'tl','aria-hidden':'true'});
+          list.slice(0,3).forEach(function(b){
+            tl.append(h('span',{class:'t '+(b.by&&b.by===S.meId?'mine':'other'),text:hm(b.start)+'-'}));
+          });
+          if(list.length>3)tl.append(h('span',{class:'tmore',text:'+'+(list.length-3)}));
+          cell.append(tl);
+        }
         wrap.append(cell);
       })();
     }
@@ -306,7 +320,7 @@ import { firebaseConfig } from "./firebase-config.js";
     if(!S.db)note='';
     else if(!S.loaded)note='예약 내용을 불러오는 중입니다.';
     else if(total===0)note='이번 달 예약이 없습니다. 날짜를 눌러 예약하세요.';
-    else note='이번 달 예약 '+total+'건 · 날짜를 누르면 예약할 수 있습니다.';
+    else note='이번 달 예약 '+total+'건 · 날짜를 누르면 그날 예약을 볼 수 있습니다.';
     $('note').textContent=note;
   }
 
@@ -344,7 +358,7 @@ import { firebaseConfig } from "./firebase-config.js";
 
   /* ---------- 패널 공통 ---------- */
   function closePanel(){
-    S.panel=null;
+    S.panel=null;S.panelFrom=null;
     $('overlay-root').replaceChildren();
   }
   function showPanel(content,opts){
@@ -358,11 +372,11 @@ import { firebaseConfig } from "./firebase-config.js";
   document.addEventListener('keydown',function(e){if(e.key==='Escape'&&S.panel)closePanel();});
 
   var toastTimer;
-  function toast(msg){
+  function toast(msg,ms){
     var t=$('toast');
     t.textContent=msg;t.hidden=false;
     clearTimeout(toastTimer);
-    toastTimer=setTimeout(function(){t.hidden=true;},2600);
+    toastTimer=setTimeout(function(){t.hidden=true;},ms||2600);
   }
 
   /* ---------- 예약 계산 ---------- */
@@ -389,26 +403,36 @@ import { firebaseConfig } from "./firebase-config.js";
     for(var m=start;m<end;m+=STEP)a.push(date+'_'+pad(Math.floor(m/60))+pad(m%60));
     return a;
   }
-  function localConflicts(dates,start,end,ignoreId){
+  function localConflicts(dates,start,end){
     var set=new Set(dates);
     return S.bookings.filter(function(b){
-      return b.id!==ignoreId&&set.has(b.date)&&b.start<end&&start<b.end;
+      return set.has(b.date)&&b.start<end&&start<b.end;
     });
   }
-  async function place(id,data,old){
-    var ref=id?doc(DB,'bookings',id):doc(collection(DB,'bookings'));
+  function chunks(arr,n){
+    var out=[];
+    for(var i=0;i<arr.length;i+=n)out.push(arr.slice(i,i+n));
+    return out;
+  }
+
+  /* 비밀번호는 예약 번호와 섞어서 암호화(SHA-256)한 값만 저장합니다. 이 값은 아무도 읽을 수 없는 secrets 문서에 들어갑니다. */
+  async function sha256(str){
+    var buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(function(x){return x.toString(16).padStart(2,'0');}).join('');
+  }
+  function pinHash(id,pin){return sha256('mr1|'+id+'|'+pin);}
+
+  async function place(data,pin){
+    var ref=doc(collection(DB,'bookings'));
     var ids=slotIds(data.date,data.start,data.end);
+    var pw=await pinHash(ref.id,pin);
     await runTransaction(DB,async function(tx){
       var snaps=await Promise.all(ids.map(function(s){return tx.get(doc(DB,'slots',s));}));
       for(var i=0;i<snaps.length;i++){
-        if(snaps[i].exists()&&snaps[i].data().bid!==ref.id)throw {kind:'conflict'};
-      }
-      if(old){
-        slotIds(old.date,old.start,old.end).forEach(function(s){
-          if(ids.indexOf(s)<0)tx.delete(doc(DB,'slots',s));
-        });
+        if(snaps[i].exists())throw {kind:'conflict'};
       }
       ids.forEach(function(s){tx.set(doc(DB,'slots',s),{bid:ref.id,date:data.date});});
+      tx.set(doc(DB,'secrets',ref.id),{pwHash:pw});
       tx.set(ref,data);
     });
   }
@@ -424,12 +448,12 @@ import { firebaseConfig } from "./firebase-config.js";
   function openForm(init){
     if(!S.canWrite)return;
     var cur=ymd(S.cursor)<todayStr()?todayStr():ymd(S.cursor);
-    var f=Object.assign({mode:'new',title:'',date:cur,start:10*60,end:11*60,repeat:'none'},init||{});
+    var f=Object.assign({title:'',date:cur,start:10*60,end:11*60,repeat:'none'},init||{});
     S.panel={type:'form'};
-    var edit=f.mode==='edit';
 
     var title=h('input',{id:'f-title',type:'text',maxlength:'60',placeholder:'예: 미팅','data-autofocus':true,value:f.title});
-    var who=h('input',{id:'f-name',type:'text',maxlength:'30',placeholder:'예: 홍길동',value:edit?'':S.myName});
+    var who=h('input',{id:'f-name',type:'text',maxlength:'30',placeholder:'예: 홍길동',value:S.myName});
+    var pin=h('input',{id:'f-pin',type:'text',inputmode:'numeric',pattern:'[0-9]*',maxlength:'4',autocomplete:'off',placeholder:'숫자 4자리'});
     var date=h('input',{id:'f-date',type:'date',min:todayStr(),value:f.date});
     var start=timeSelect('f-start',START,END-STEP,f.start);
     var end=timeSelect('f-end',START+STEP,END,f.end);
@@ -457,14 +481,14 @@ import { firebaseConfig } from "./firebase-config.js";
     function showDow(){dateLabel.textContent=date.value?'날짜 ('+DOW[parse(date.value).getDay()]+'요일)':'날짜';}
     date.addEventListener('input',showDow);
     date.addEventListener('change',showDow);
-    showDow();
     date.addEventListener('change',function(){
-      if(date.value&&!edit)until.value=ymd(addDays(parse(date.value),28));
+      if(date.value)until.value=ymd(addDays(parse(date.value),28));
     });
+    showDow();
 
     var err=h('p',{class:'err',role:'alert'});
     var skipBtn=h('button',{type:'button',class:'btn',hidden:true,text:'겹치는 날 빼고 예약'});
-    var okBtn=h('button',{type:'submit',class:'btn primary',text:edit?'저장':'예약하기'});
+    var okBtn=h('button',{type:'submit',class:'btn primary',text:'예약하기'});
     var cancelBtn=h('button',{type:'button',class:'btn',text:'닫기',onclick:closePanel});
 
     function showConflict(list,all,okCount){
@@ -473,7 +497,7 @@ import { firebaseConfig } from "./firebase-config.js";
       });
       if(list.length>5)lines.push('외 '+(list.length-5)+'건');
       err.textContent='이미 예약된 시간과 겹칩니다.\n'+lines.join('\n');
-      if(!edit&&!all&&okCount>0){
+      if(!all&&okCount>0){
         skipBtn.hidden=false;
         skipBtn.textContent='겹치는 날 빼고 '+okCount+'건 예약';
       }
@@ -481,83 +505,102 @@ import { firebaseConfig } from "./firebase-config.js";
 
     async function run(skip){
       err.textContent='';skipBtn.hidden=true;
-      var t=title.value.trim(),nm=who.value.trim(),d=date.value,s=+start.value,e=+end.value;
+      var t=title.value.trim(),nm=who.value.trim(),pw=pin.value.trim(),d=date.value,s=+start.value,e=+end.value;
       if(!t){err.textContent='회의 제목을 입력하세요.';title.focus();return;}
-      if(!edit&&!nm){err.textContent='예약자 이름을 입력하세요.';who.focus();return;}
+      if(!nm){err.textContent='예약자 이름을 입력하세요.';who.focus();return;}
+      if(!/^[0-9]{4}$/.test(pw)){err.textContent='비밀번호는 숫자 4자리로 입력하세요.';pin.focus();return;}
       if(!d){err.textContent='날짜를 선택하세요.';return;}
       if(d<todayStr()){err.textContent='지난 날짜에는 예약할 수 없습니다.';return;}
       if(e<=s){err.textContent='종료 시간이 시작 시간보다 뒤여야 합니다.';return;}
       var nowD=new Date();
       if(d===todayStr()&&e<=nowD.getHours()*60+nowD.getMinutes()){err.textContent='이미 지난 시간입니다.';return;}
-      var rep=edit?'none':repeat.value;
+      var rep=repeat.value;
       var untilStr=endMode.value==='none'?ymd(addDays(parse(d),183)):until.value;
       if(rep!=='none'&&endMode.value==='date'&&(!until.value||until.value<d)){err.textContent='반복 종료일을 시작 날짜 이후로 선택하세요.';return;}
       okBtn.disabled=true;skipBtn.disabled=true;
       try{
         var made=0,failed=0;
-        if(edit){
-          var cf=localConflicts([d],s,e,f.id);
-          if(cf.length){showConflict(cf,true,0);okBtn.disabled=false;skipBtn.disabled=false;return;}
-          var old=S.bookings.filter(function(x){return x.id===f.id;})[0];
-          if(!old)throw new Error('missing');
-          var base=Object.assign({},old);delete base.id;
-          await place(f.id,Object.assign(base,{title:t,date:d,start:s,end:e}),old);
-        }else{
-          S.myName=nm;
-          try{localStorage.setItem('mr-name',nm);}catch(x){}
-          var dates=occurrences(d,rep,untilStr);
-          var cfs=localConflicts(dates,s,e,null);
-          var bad=new Set(cfs.map(function(c){return c.date;}));
-          var good=dates.filter(function(x){return !bad.has(x);});
-          if(!good.length||(bad.size&&!skip)){
-            showConflict(cfs,good.length===0,good.length);
-            okBtn.disabled=false;skipBtn.disabled=false;return;
-          }
-          var sid=rep!=='none'?(window.crypto&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2)):null;
-          for(var i=0;i<good.length;i++){
-            if(good.length>1)okBtn.textContent='예약 중… '+(i+1)+'/'+good.length;
-            try{
-              await place(null,{title:t,date:good[i],start:s,end:e,by:S.meId,byName:nm,seriesId:sid,repeat:rep,createdAt:Date.now()},null);
-              made++;
-            }catch(x){
-              if(x&&x.kind==='conflict')failed++;else throw x;
-            }
+        S.myName=nm;
+        try{localStorage.setItem('mr-name',nm);}catch(x){}
+        var dates=occurrences(d,rep,untilStr);
+        var cfs=localConflicts(dates,s,e);
+        var bad=new Set(cfs.map(function(c){return c.date;}));
+        var good=dates.filter(function(x){return !bad.has(x);});
+        if(!good.length||(bad.size&&!skip)){
+          showConflict(cfs,good.length===0,good.length);
+          okBtn.disabled=false;skipBtn.disabled=false;return;
+        }
+        var sid=rep!=='none'?(window.crypto&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2)):null;
+        for(var i=0;i<good.length;i++){
+          if(good.length>1)okBtn.textContent='예약 중… '+(i+1)+'/'+good.length;
+          try{
+            await place({title:t,date:good[i],start:s,end:e,by:S.meId,byName:nm,seriesId:sid,repeat:rep,createdAt:Date.now()},pw);
+            made++;
+          }catch(x){
+            if(x&&x.kind==='conflict')failed++;else throw x;
           }
         }
         S.cursor=parse(d);
         closePanel();
         renderGrid();
-        if(edit)toast('예약을 수정했습니다.');
-        else if(made===0)toast('다른 사람이 방금 같은 시간을 예약했습니다.');
-        else toast((made>1?made+'건을 예약했습니다.':'예약했습니다.')+(failed?' ('+failed+'건은 방금 다른 예약과 겹쳐 제외)':''));
+        if(made===0)toast('다른 사람이 방금 같은 시간을 예약했습니다.');
+        else toast((made>1?made+'건을 예약했습니다.':'예약했습니다.')+(failed?' ('+failed+'건은 방금 다른 예약과 겹쳐 제외)':'')+' 취소 비밀번호: '+pw,6000);
       }catch(x){
-        okBtn.disabled=false;skipBtn.disabled=false;okBtn.textContent=edit?'저장':'예약하기';
-        if(x&&x.kind==='conflict')err.textContent='다른 사람이 방금 같은 시간을 예약했습니다. 시간표를 확인하고 다시 시도하세요.';
-        else err.textContent='저장하지 못했습니다. 인터넷 연결과 Firebase 설정을 확인하고 다시 시도하세요.';
+        okBtn.disabled=false;skipBtn.disabled=false;okBtn.textContent='예약하기';
+        if(x&&x.kind==='conflict')err.textContent='다른 사람이 방금 같은 시간을 예약했습니다. 달력을 확인하고 다시 시도하세요.';
+        else err.textContent='저장하지 못했습니다. 인터넷 연결과 Firebase 설정(규칙 포함)을 확인하고 다시 시도하세요.';
       }
     }
     skipBtn.addEventListener('click',function(){run(true);});
     var form=h('form',{novalidate:true,onsubmit:function(ev){ev.preventDefault();run(false);}},
       h('div',{class:'field'},h('label',{for:'f-title',text:'회의 제목'}),title),
-      edit?null:h('div',{class:'field'},h('label',{for:'f-name',text:'예약자 이름'}),who),
+      h('div',{class:'field'},h('label',{for:'f-name',text:'예약자 이름'}),who),
+      h('div',{class:'field'},h('label',{for:'f-pin',text:'취소용 비밀번호 (숫자 4자리)'}),pin,
+        h('span',{class:'hint',text:'예약을 취소할 때 필요합니다. 수정은 할 수 없으니, 바꾸려면 취소 후 다시 예약하세요.'})),
       h('div',{class:'field'},dateLabel,date),
       h('div',{class:'row2'},
         h('div',{class:'field'},h('label',{for:'f-start',text:'시작'}),start),
         h('div',{class:'field'},h('label',{for:'f-end',text:'종료'}),end)
       ),
-      edit?h('p',{class:'sub',text:'반복 예약은 이 날짜의 한 건만 수정됩니다.'}):[
-        h('div',{class:'field'},h('label',{for:'f-repeat',text:'반복'}),repeat),
-        untilField
-      ],
+      h('div',{class:'field'},h('label',{for:'f-repeat',text:'반복'}),repeat),
+      untilField,
       err,
       h('div',{class:'actions'},cancelBtn,skipBtn,okBtn)
     );
     syncRepeat();
-    showPanel([h('h2',{text:edit?'예약 수정':'미팅룸 예약'}),form],{label:edit?'예약 수정':'미팅룸 예약'});
-    if(!edit&&S.myName)title.focus();else if(!edit)who.focus();
+    showPanel([h('h2',{text:'미팅룸 예약'}),form],{label:'미팅룸 예약'});
+    if(S.myName)title.focus();else who.focus();
   }
 
-  /* ---------- 상세 / 수정 / 취소 ---------- */
+  /* ---------- 날짜별 목록 / 상세 / 취소 ---------- */
+  function openDay(ds){
+    var d=parse(ds);
+    S.panel={type:'day',date:ds};
+    S.panelFrom=ds;
+    var list=S.bookings.filter(function(b){return b.date===ds;}).sort(function(a,b){return a.start-b.start;});
+    var items=h('div',{class:'items'});
+    list.forEach(function(b){
+      var mine=b.by&&b.by===S.meId;
+      items.append(h('button',{type:'button',class:'it'+(mine?' mine':''),onclick:function(){openDetail(b.id);}},
+        h('span',{class:'tm',text:hm(b.start)+'–'+hm(b.end)}),
+        h('span',{class:'tt',text:b.title}),
+        h('span',{class:'by',text:nameOf(b)}),
+        b.seriesId?h('span',{class:'rp',text:'반복 · '+(REPEATS[b.repeat]||'')}):null));
+    });
+    var canBook=S.canWrite&&ds>=todayStr();
+    showPanel([
+      h('h2',{text:d.getFullYear()+'년 '+dayLabel(d)}),
+      list.length?items:h('p',{class:'sub',text:'이 날짜에는 예약이 없습니다.'}),
+      h('div',{class:'actions'},
+        h('button',{type:'button',class:'btn',text:'닫기',onclick:closePanel}),
+        canBook?h('button',{type:'button',class:'btn primary',text:'이 날짜에 예약하기','data-autofocus':true,onclick:function(){
+          S.panelFrom=null;
+          var st=defaultStart(ds);
+          openForm({date:ds,start:st,end:Math.min(st+60,END)});
+        }}):null)
+    ],{label:'날짜별 예약 목록'});
+  }
+
   function openDetail(id,confirmKind){
     var b=S.bookings.filter(function(x){return x.id===id;})[0];
     if(!b)return;
@@ -567,33 +610,36 @@ import { firebaseConfig } from "./firebase-config.js";
       h('dt',{text:'날짜'}),h('dd',{text:parse(b.date).getFullYear()+'년 '+dayLabel(parse(b.date))}),
       h('dt',{text:'시간'}),h('dd',{class:'mono',text:hm(b.start)+' – '+hm(b.end)}),
       h('dt',{text:'예약자'}),h('dd',{text:nameOf(b)}),
-      inSeries?[h('dt',{text:'반복'}),h('dd',{text:REPEATS[b.repeat]||'반복 예약'})]:null
+      inSeries?h('dt',{text:'반복'}):null,
+      inSeries?h('dd',{text:REPEATS[b.repeat]||'반복 예약'}):null
     );
-    var actions=h('div',{class:'actions'});
+    var body=[h('h2',{text:b.title}),kv];
     if(confirmKind){
       var series=confirmKind==='series';
-      actions.append(
-        h('button',{type:'button',class:'btn',text:'돌아가기',onclick:function(){openDetail(id);}}),
-        h('button',{type:'button',class:'btn danger solid',text:series?'이 날짜 이후 모두 삭제':'삭제',
-          onclick:function(ev){removeBooking(b,series,ev.currentTarget);},'data-autofocus':true})
-      );
+      var pw=h('input',{id:'c-pin',type:'password',inputmode:'numeric',pattern:'[0-9]*',maxlength:'4',autocomplete:'off',placeholder:'숫자 4자리','data-autofocus':true});
+      var err=h('p',{class:'err',role:'alert'});
+      var go=h('button',{type:'submit',class:'btn danger solid',text:series?'이후 반복 모두 삭제':'예약 취소'});
+      body.push(h('form',{novalidate:true,onsubmit:function(ev){ev.preventDefault();removeBooking(b,series,pw.value.trim(),err,go);}},
+        h('p',{class:'sub',text:series?'이 날짜부터 이어지는 반복 예약을 모두 삭제합니다. 되돌릴 수 없습니다.':'이 예약을 삭제합니다. 되돌릴 수 없습니다.'}),
+        h('div',{class:'field'},h('label',{for:'c-pin',text:'예약할 때 정한 비밀번호 (숫자 4자리)'}),pw),
+        err,
+        h('div',{class:'actions'},
+          h('button',{type:'button',class:'btn',text:'돌아가기',onclick:function(){openDetail(id);}}),
+          go)));
     }else{
-      actions.append(
+      body.push(h('div',{class:'actions'},
+        S.panelFrom?h('button',{type:'button',class:'btn',text:'← 목록',onclick:function(){openDay(S.panelFrom);}}):null,
         h('button',{type:'button',class:'btn',text:'닫기',onclick:closePanel}),
         inSeries?h('button',{type:'button',class:'btn danger',text:'이후 반복 모두 취소',onclick:function(){openDetail(id,'series');}}):null,
-        h('button',{type:'button',class:'btn danger',text:'예약 취소',onclick:function(){openDetail(id,'one');}}),
-        h('button',{type:'button',class:'btn primary',text:'수정',onclick:function(){
-          openForm({mode:'edit',id:b.id,title:b.title,date:b.date,start:b.start,end:b.end});
-        },'data-autofocus':true})
-      );
+        h('button',{type:'button',class:'btn danger',text:'예약 취소','data-autofocus':true,onclick:function(){openDetail(id,'one');}})
+      ));
     }
-    var body=[h('h2',{text:b.title}),kv];
-    if(confirmKind)body.push(h('p',{class:'err',text:confirmKind==='series'?'이 날짜부터 이어지는 반복 예약을 모두 삭제합니다. 되돌릴 수 없습니다.':'이 예약을 삭제합니다. 되돌릴 수 없습니다.'}));
-    body.push(actions);
     showPanel(body,{label:'예약 상세'});
   }
 
-  async function removeBooking(b,series,btn){
+  async function removeBooking(b,series,pw,err,btn){
+    err.textContent='';
+    if(!/^[0-9]{4}$/.test(pw)){err.textContent='비밀번호 숫자 4자리를 입력하세요.';return;}
     btn.disabled=true;
     try{
       var list=[b];
@@ -602,19 +648,44 @@ import { firebaseConfig } from "./firebase-config.js";
         list=snap.docs.map(function(d){return Object.assign({id:d.id},d.data());})
           .filter(function(x){return x.date>=b.date;});
       }
-      for(var i=0;i<list.length;i+=15){
-        var batch=writeBatch(DB);
-        list.slice(i,i+15).forEach(function(x){
-          batch.delete(doc(DB,'bookings',x.id));
-          slotIds(x.date,x.start,x.end).forEach(function(s){batch.delete(doc(DB,'slots',s));});
-        });
-        await batch.commit();
+      /* 1단계: 비밀번호 확인 (맞지 않으면 여기서 막혀 아무것도 지워지지 않습니다) */
+      var groups=chunks(list,15),g,k;
+      for(g=0;g<groups.length;g++){
+        var proof=writeBatch(DB);
+        for(k=0;k<groups[g].length;k++){
+          proof.set(doc(DB,'cancels',groups[g][k].id),{proof:await pinHash(groups[g][k].id,pw)});
+        }
+        try{await proof.commit();}
+        catch(e){
+          if(e&&e.code==='permission-denied'){err.textContent='비밀번호가 맞지 않습니다.';btn.disabled=false;return;}
+          throw e;
+        }
+      }
+      /* 2단계: 예약, 30분 칸, 비밀번호 정보 삭제 */
+      for(g=0;g<groups.length;g++){
+        var bb=writeBatch(DB);
+        groups[g].forEach(function(x){bb.delete(doc(DB,'bookings',x.id));});
+        await bb.commit();
+      }
+      var slots=[];
+      list.forEach(function(x){slotIds(x.date,x.start,x.end).forEach(function(sid){slots.push(sid);});});
+      var sg=chunks(slots,15);
+      for(g=0;g<sg.length;g++){
+        var sb=writeBatch(DB);
+        sg[g].forEach(function(sid){sb.delete(doc(DB,'slots',sid));});
+        await sb.commit();
+      }
+      var rg=chunks(list,7);
+      for(g=0;g<rg.length;g++){
+        var rb=writeBatch(DB);
+        rg[g].forEach(function(x){rb.delete(doc(DB,'secrets',x.id));rb.delete(doc(DB,'cancels',x.id));});
+        await rb.commit();
       }
       closePanel();
       toast(list.length>1?list.length+'건을 취소했습니다.':'예약을 취소했습니다.');
     }catch(e){
       btn.disabled=false;
-      toast('취소하지 못했습니다. 다시 시도하세요.');
+      err.textContent='취소하지 못했습니다. 인터넷 연결을 확인하고 다시 시도하세요.';
     }
   }
 
@@ -649,6 +720,7 @@ import { firebaseConfig } from "./firebase-config.js";
         S.bookings=snap.docs.map(function(d){return Object.assign({id:d.id},d.data());});
         S.loaded=true;S.error='';
         if(S.panel&&S.panel.type==='detail'&&!S.bookings.some(function(b){return b.id===S.panel.id;}))closePanel();
+        else if(S.panel&&S.panel.type==='day')openDay(S.panel.date);
         renderGrid();
       },function(){
         S.error='예약 목록을 불러오지 못했습니다. Firebase 규칙(README 2단계)과 인터넷 연결을 확인하세요.';
