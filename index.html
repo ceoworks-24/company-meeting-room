@@ -133,11 +133,7 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
 .chip .cn{opacity:.85}
 .mc.past{cursor:default}
 .mc.past:hover{background:transparent}
-.list{margin-top:28px}
-.lh{margin:0 0 10px;font-size:16px;font-weight:600}
 .items{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
-.dh{padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--line-soft)}
-.dh.today{color:var(--accent)}
 .it{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:4px 12px;align-items:baseline;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line-soft);background:transparent;padding:10px 14px;cursor:pointer}
 .it:last-child{border-bottom:0}
 .it:hover{background:var(--today)}
@@ -146,7 +142,6 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
 .it .by{font-size:13px;color:var(--muted)}
 .it .rp{grid-column:2/4;justify-self:start;font-size:11px;color:var(--accent)}
 .it.mine .by{color:var(--accent);font-weight:500}
-.more-btn{margin-top:10px;width:100%}
 .help{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 .help p{margin:0 0 4px}
 .help a{color:var(--accent)}
@@ -175,7 +170,6 @@ h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em;text-wrap:balan
   <div class="cal-scroll" id="cal-scroll"></div>
   <p class="note" id="note"></p>
   <div class="legend"><span><i class="a"></i>내가 예약한 건</span><span><i class="b"></i>다른 팀원 예약</span></div>
-  <section class="list" id="list" aria-label="예약 목록"></section>
   <footer class="help">
     <p>수정요청, 버그제보, 기타문의는 언제든지 연락주세요</p>
     <p><a href="https://open.kakao.com/me/ceo24" target="_blank" rel="noopener">카카오톡 1:1 메시지 바로가기</a></p>
@@ -193,7 +187,7 @@ import { firebaseConfig } from "./firebase-config.js";
   var START=9*60, END=19*60, STEP=30;
   var SLOTS=(END-START)/STEP, SLOT_H=26;
   var DOW=['일','월','화','수','목','금','토'];
-  var REPEATS={none:'반복 안 함',weekly:'매주',biweekly:'격주',weekdays:'평일 매일'};
+  var REPEATS={none:'반복 안 함',weekly:'매주',biweekly:'격주',monthly:'매월',weekdays:'평일 매일'};
   var MAX_OCC=200;
   var DB=null;
 
@@ -230,7 +224,7 @@ import { firebaseConfig } from "./firebase-config.js";
   function mondayOf(d){var x=new Date(d);var w=x.getDay();x.setDate(x.getDate()+(w===0?-6:1-w));return x;}
 
   var S={
-    view:'month',listLimit:20,panelFrom:null,
+    view:'month',panelFrom:null,
     cursor:new Date(),
     bookings:[],meId:null,myName:'',db:null,
     canWrite:false,loaded:false,error:'',
@@ -256,7 +250,6 @@ import { firebaseConfig } from "./firebase-config.js";
     renderToolbar();
     renderBanner();
     renderMonth();
-    renderList();
   }
 
   function defaultStart(ds){
@@ -324,38 +317,6 @@ import { firebaseConfig } from "./firebase-config.js";
     $('note').textContent=note;
   }
 
-  function renderList(){
-    var box=$('list');
-    box.replaceChildren(h('h2',{class:'lh',text:'예약 목록'}));
-    if(!S.db)return;
-    if(!S.loaded){box.append(h('p',{class:'note',text:'불러오는 중입니다.'}));return;}
-    var t=todayStr(),n=new Date(),nowMin=n.getHours()*60+n.getMinutes(),thisYear=n.getFullYear();
-    var up=S.bookings.filter(function(b){return b.date>t||(b.date===t&&b.end>nowMin);})
-      .sort(function(a,b){return a.date<b.date?-1:(a.date>b.date?1:a.start-b.start);});
-    if(!up.length){box.append(h('p',{class:'note',text:'앞으로 예정된 예약이 없습니다.'}));return;}
-    var shown=up.slice(0,S.listLimit),lastDate='';
-    var items=h('div',{class:'items'});
-    shown.forEach(function(b){
-      if(b.date!==lastDate){
-        lastDate=b.date;
-        var dd=parse(b.date);
-        items.append(h('div',{class:'dh'+(b.date===t?' today':''),
-          text:(b.date===t?'오늘 · ':'')+(dd.getFullYear()!==thisYear?dd.getFullYear()+'년 ':'')+dayLabel(dd)}));
-      }
-      var mine=b.by&&b.by===S.meId;
-      items.append(h('button',{type:'button',class:'it'+(mine?' mine':''),onclick:function(){openDetail(b.id);}},
-        h('span',{class:'tm',text:hm(b.start)+'–'+hm(b.end)}),
-        h('span',{class:'tt',text:b.title}),
-        h('span',{class:'by',text:nameOf(b)}),
-        b.seriesId?h('span',{class:'rp',text:'반복 · '+(REPEATS[b.repeat]||'')}):null));
-    });
-    box.append(items);
-    if(up.length>shown.length){
-      box.append(h('button',{type:'button',class:'btn more-btn',text:'더 보기 ('+(up.length-shown.length)+'건 남음)',
-        onclick:function(){S.listLimit+=20;renderList();}}));
-    }
-  }
-
   /* ---------- 패널 공통 ---------- */
   function closePanel(){
     S.panel=null;S.panelFrom=null;
@@ -383,6 +344,16 @@ import { firebaseConfig } from "./firebase-config.js";
   function occurrences(date,repeat,until){
     if(repeat==='none')return [date];
     var out=[],d=parse(date),end=parse(until),guard=0;
+    if(repeat==='monthly'){
+      var base=parse(date),day=base.getDate();
+      for(var k=0;k<MAX_OCC;k++){
+        var last=new Date(base.getFullYear(),base.getMonth()+k+1,0).getDate();
+        var m=new Date(base.getFullYear(),base.getMonth()+k,Math.min(day,last));
+        if(m>end)break;
+        out.push(ymd(m));
+      }
+      return out;
+    }
     while(d<=end&&out.length<MAX_OCC&&guard<800){
       guard++;
       var w=d.getDay();
@@ -555,8 +526,8 @@ import { firebaseConfig } from "./firebase-config.js";
     var form=h('form',{novalidate:true,onsubmit:function(ev){ev.preventDefault();run(false);}},
       h('div',{class:'field'},h('label',{for:'f-title',text:'회의 제목'}),title),
       h('div',{class:'field'},h('label',{for:'f-name',text:'예약자 이름'}),who),
-      h('div',{class:'field'},h('label',{for:'f-pin',text:'취소용 비밀번호 (숫자 4자리)'}),pin,
-        h('span',{class:'hint',text:'예약을 취소할 때 필요합니다. 수정은 할 수 없으니, 바꾸려면 취소 후 다시 예약하세요.'})),
+      h('div',{class:'field'},h('label',{for:'f-pin',text:'비밀번호 (숫자 4자리)'}),pin,
+        h('span',{class:'hint',text:'예약을 취소할 때 필요합니다.'})),
       h('div',{class:'field'},dateLabel,date),
       h('div',{class:'row2'},
         h('div',{class:'field'},h('label',{for:'f-start',text:'시작'}),start),
